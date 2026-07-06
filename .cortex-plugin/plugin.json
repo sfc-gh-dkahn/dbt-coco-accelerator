@@ -1,0 +1,19 @@
+{
+  "name": "dbt-coco-accelerator",
+  "version": "0.1.0",
+  "description": "Accelerate dbt analytics-engineering work from Jira or Linear tickets inside Snowflake Cortex Code. Includes a one-time setup skill that installs the required MCP servers (dbt + your ticket tool), authenticates GitHub, and configures the accelerator to your workflow. Community project — not an official Snowflake, dbt, Atlassian, or Linear product.",
+  "author": {
+    "name": "Dylan Kahn"
+  },
+  "skills": "./skills/",
+  "keywords": [
+    "dbt",
+    "jira",
+    "linear",
+    "analytics-engineering",
+    "mcp",
+    "cortex-code",
+    "data-transformation",
+    "git-workflow"
+  ]
+}

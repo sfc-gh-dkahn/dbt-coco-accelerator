@@ -1,0 +1,40 @@
+# ---- Secrets / local config (NEVER commit) ----
+# CoCo MCP config holds the dbt Cloud service token in plaintext
+mcp.json
+**/mcp.json
+# Setup marker written on the user's machine
+.dbt-coco-accelerator.json
+**/.dbt-coco-accelerator.json
+# Generic secret files
+.env
+.env.*
+*.env
+secrets.*
+credentials.*
+*.pem
+*.key
+# dbt connection profiles (can contain warehouse creds)
+profiles.yml
+.user.yml
+
+# ---- dbt build artifacts (in case anyone tests inside this repo) ----
+target/
+dbt_packages/
+logs/
+.dbt/
+
+# ---- Python (dbt / uv tooling) ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+.uv/
+
+# ---- Editor / IDE ----
+.vscode/
+.idea/
+*.swp
+
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
