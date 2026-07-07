@@ -67,7 +67,7 @@ Then continue.
   - header: `dbt setup`
   - question: `How do you run dbt?`
   - options:
-    - `Local dbt project` — You have a local dbt project folder (dbt Core, the dbt Fusion engine, or a dbt Projects on Snowflake project you author locally). Uses the local dbt MCP server (uvx dbt-mcp).
+    - `Local dbt project` — You have (or can clone) a git-backed dbt project — dbt Core, the dbt Fusion engine, or **dbt Projects on Snowflake** (even if you authored it in Snowsight; I'll clone the repo and set up local dbt). Uses the local dbt MCP server (uvx dbt-mcp).
     - `dbt Cloud / platform (remote)` — Hosted dbt with no local project. Uses the remote dbt MCP server over HTTP. **Prefers OAuth** (just an MCP URL + browser sign-in, like Jira/Linear); falls back to a service token only if OAuth isn't available on the account.
 
 **If — and only if — they chose dbt Cloud:** prefer **OAuth** (no token, no plaintext secret). **Ask exactly this** (one field):
@@ -98,7 +98,7 @@ Work these out yourself and hold the results for the review gate. Do **not** ask
    | config | `~/.snowflake/cortex/mcp.json` | `~/.snowflake/cortex/mcp.json` | `%USERPROFILE%\.snowflake\cortex\mcp.json` |
    | install `uv` | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `winget install astral-sh.uv` |
    | install `gh` | `brew install gh` | https://github.com/cli/cli#installation | `winget install GitHub.cli` |
-2. **dbt project + repo path** (local flavor) — `find ~ . -maxdepth 4 -name dbt_project.yml 2>/dev/null`. This folder is also the **git repo** (the accelerator branches/commits here). If several are found, keep them for the review gate and let the user pick there. On Windows, if `find` is unavailable, this is one of the few things you may ask.
+2. **dbt project + repo path** (local flavor) — `find ~ . -maxdepth 4 -name dbt_project.yml 2>/dev/null`. This folder is also the **git repo** (the accelerator branches/commits here). If several are found, keep them for the review gate and let the user pick there. On Windows, if `find` is unavailable, this is one of the few things you may ask. **If none is found**, the user may author in **Snowsight (dbt Projects on Snowflake)** — still git-backed, just not cloned locally; ask for the repo URL so you can `git clone` it in Phase 4 (the project often lives in a subfolder).
 3. **Default branch** — `git -C <repo> symbolic-ref --short refs/remotes/origin/HEAD` (fallback `main`).
 4. **`gh` presence + auth** — `gh --version`, `gh auth status`.
 5. **`uv`/`uvx`** (local flavor only) and **`git`** — `command -v`.
@@ -172,6 +172,10 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
      ```bash
      cortex mcp add dbt uvx dbt-mcp -e DBT_PROJECT_DIR="<REPO_PATH>" -e DBT_PATH=dbt
      ```
+     Handle these first only if they apply (most local users need none):
+     - **No local clone yet** (Snowsight-authored dbt Projects on Snowflake): `git clone` their repo; `DBT_PROJECT_DIR` is the project folder (often a subfolder).
+     - **No local `dbt` binary** (`dbt-mcp` crashes if `DBT_PATH` isn't found — check `command -v dbt`/`dbtf`): install it (`uv tool install dbt-core --with dbt-snowflake`) and pass its real path, or add `-e DISABLE_DBT_CLI=true` for a compile-only setup (validation then relies on a Snowflake run).
+     - **Placeholder `profiles.yml`** (built to run in Snowflake): create `~/.dbt/profiles.yml` from their existing `snow` connection — prefer key-pair or `authenticator: externalbrowser` over a plaintext password, `chmod 600`, keep it **out of the git repo**; confirm with `dbt debug`.
    - **dbt Cloud — OAuth (preferred):** URL only, http transport; CoCo does the browser OAuth on first connect, like Jira/Linear.
      ```bash
      cortex mcp add dbt "<MCP_ENDPOINT_URL>" --type http
