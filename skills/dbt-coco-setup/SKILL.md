@@ -102,7 +102,7 @@ Work these out yourself and hold the results for the review gate. Do **not** ask
 3. **Default branch** — `git -C <repo> symbolic-ref --short refs/remotes/origin/HEAD` (fallback `main`).
 4. **`gh` presence + auth** — `gh --version`, `gh auth status`.
 5. **`uv`/`uvx`** (local flavor only) and **`git`** — `command -v`.
-6. **Existing `mcp.json`** — read it (if present) so you can show an accurate merge preview. Never print secrets back to the user.
+6. **Existing MCP servers** — run `cortex mcp list` (and/or read `mcp.json`) to see what's already configured, and check whether a working server already covers what you'd add: a **Jira/Atlassian** server (any name — `atlassian`, `atlassian-remote`, a Snowflake-hosted one) for the Jira flow, a **Linear** server for the Linear flow, or an existing **dbt** server. If one exists and is connected, plan to **reuse it — don't add a duplicate**. Never print secrets back to the user.
 
 **Defaults to assume** (no need to ask; the user can change them at the review gate):
 - Branch naming: `feature/<KEY>-<short-description>`
@@ -130,10 +130,10 @@ Defaults I'll use (you can change any):
   • Branch names: feature/<KEY>-<slug>   • Commits: conventional   • PRs: gh CLI
   • Jira/Linear specifics: discovered automatically per ticket
 When you proceed, I will:
-  1. Install dbt Labs' official dbt skills (dbt-labs/dbt-agent-skills)
-  2. Add these to ~/.snowflake/cortex/mcp.json (your existing servers untouched):
-       + dbt        (<local uvx | remote http>)
-       + <atlassian | linear>
+  1. Install dbt Labs' official dbt skills as a syncable plugin (dbt-labs/dbt-agent-skills)
+  2. Add only the MCP servers you don't already have (existing servers untouched; a Jira/Linear/dbt server you already have is reused, not duplicated):
+       + dbt        (<local uvx | remote http>)   ← only if not already present
+       + <atlassian | linear>                     ← only if not already present
   3. [Install any missing prerequisites: <list>]  ← only if something's missing
   4. Save your setup into the <accelerator> skill
 ```
@@ -164,8 +164,10 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
      - `Done — I'm signed in` — I'll verify and keep going.
      - `Cancel setup` — Stops here; without GitHub auth the accelerator can't push branches or open PRs.
    After they pick "Done," confirm with `gh auth status`. If it still fails, show the command again and re-ask — never proceed unauthenticated.
-2. **dbt skills** — install `dbt-labs/dbt-agent-skills` (the `dbt` bundle) via CoCo's own skill installer (`find-skill` / GitHub plugin installer) targeting `https://github.com/dbt-labs/dbt-agent-skills` (subfolder `skills/dbt` if supported; otherwise the whole repo — extras are harmless). **Fallback:** `npx skills add dbt-labs/dbt-agent-skills/skills/dbt --global`, or clone and copy `skills/dbt/skills/<name>/` into the CoCo skills dir. Verify at least `using-dbt-for-analytics-engineering` and `running-dbt-commands` registered.
-3. **Add the MCP servers with `cortex mcp add`** — use this CLI, not a hand-edit of `mcp.json`. It merges into `~/.snowflake/cortex/mcp.json` **without touching existing servers** *and* registers each server with the running MCP manager, which is what lets `cortex mcp reconnect` connect them live in Phase 6 (a hand-edited JSON entry the manager never loaded can't be reconnected in-session). Add only the dbt server + the chosen ticket server. Run these yourself:
+2. **dbt skills — install as a *syncable plugin* (preferred), not loose copies.** Install `dbt-labs/dbt-agent-skills` via CoCo's GitHub plugin installer (`https://github.com/dbt-labs/dbt-agent-skills`; the `skills/dbt` bundle if the installer supports a subpath, otherwise the whole repo — the extra `dbt-migration`/`dbt-extras` skills are harmless). Installing it as a **plugin** registers it in `registry.json` with a **Sync** button — that's what lets the user pull dbt's upstream updates later. Verify at least `using-dbt-for-analytics-engineering` and `running-dbt-commands` registered.
+   - **Fallbacks if the plugin install isn't available:** `npx skills add dbt-labs/dbt-agent-skills/skills/dbt --global`; only as a **last resort**, clone and copy `skills/dbt/skills/<name>/` into the CoCo skills dir — and if you copy, **tell the user those are frozen snapshots that won't auto-update** (re-running setup can refresh them).
+   - **On a re-run / Repair:** if you find loosely-copied dbt skills from a prior install (present in the user skills dir with no registry entry), offer to convert them to the synced plugin and de-duplicate.
+3. **Add the MCP servers with `cortex mcp add`** — use this CLI, not a hand-edit of `mcp.json`. It merges into `~/.snowflake/cortex/mcp.json` **without touching existing servers** *and* registers each server with the running MCP manager, which is what lets `cortex mcp reconnect` connect them live in Phase 6 (a hand-edited JSON entry the manager never loaded can't be reconnected in-session). Add only the dbt server + the chosen ticket server, and **only the ones not already present** — if Phase 2 found a working Atlassian/Jira, Linear, or dbt server, reuse it and skip that `add`. Run these yourself:
    - **dbt Local:**
      ```bash
      cortex mcp add dbt uvx dbt-mcp -e DBT_PROJECT_DIR="<REPO_PATH>" -e DBT_PATH=dbt
