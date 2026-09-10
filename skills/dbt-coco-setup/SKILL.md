@@ -90,16 +90,27 @@ Then continue.
 - Question 1: header `ADO org`, question `Your Azure DevOps organization name — the segment after dev.azure.com in your URL (e.g. for https://dev.azure.com/contoso/MyProject it's just: contoso).`, type text, defaultValue `` (empty)
 - Question 2: header `ADO project`, question `The Azure DevOps project your dbt work items live in (e.g. Data Platform). Work item IDs are bare numbers, so the accelerator needs the project name on every lookup.`, type text, defaultValue `` (empty)
 
-**Then pick the auth path. Azure DevOps is the one ticket tool without a clean browser-OAuth story** — Microsoft's *remote* server authenticates through Microsoft Entra and requires dynamic OAuth client registration that most desktop clients (and likely CoCo) can't do; it also refuses standalone Microsoft-account orgs. The **local** server is the reliable default. **Ask exactly this:**
+**Then pick the auth path. Azure DevOps is the one ticket tool without a clean browser-OAuth story** — Microsoft's *remote* server authenticates through Microsoft Entra and requires dynamic OAuth client registration that most desktop clients (and likely CoCo) can't do; it also refuses standalone Microsoft-account orgs. The **local** server with Azure CLI credentials is the reliable default, and it's the only option here that stores **no token at all**. **Ask exactly this:**
 
 - header: `ADO sign-in`
-- question: `How should I connect to Azure DevOps? The local server is the safe default — Microsoft's hosted server needs an Entra app registration that most desktop clients can't do yet.`
+- question: `How should I connect to Azure DevOps? Azure CLI is strongly recommended — it reuses your existing az login and stores no token anywhere.`
 - options:
-  - `Azure CLI (recommended)` — Runs Microsoft's server locally and reuses your `az login` session. No token to paste or store. Needs the Azure CLI and Node 20+; I'll install what's missing.
-  - `Personal Access Token` — Runs the server locally with an ADO PAT. Works without the Azure CLI, but the token sits in plaintext in your local `mcp.json`.
+  - `Azure CLI (recommended)` — Runs Microsoft's server locally and reuses your `az login` session. **No token is created, pasted, or stored.** Needs the Azure CLI and Node 20+; I'll install what's missing.
+  - `Personal Access Token (advanced)` — Runs the server locally with an ADO PAT. You'll set it as an environment variable in your own terminal — I never see it and it never enters your `mcp.json`. Choose this only if you can't use the Azure CLI.
   - `Hosted (remote) server` — Microsoft's hosted endpoint. Fewest moving parts *if* your org is Entra-backed and CoCo can complete the sign-in — but it may fail on the OAuth step, and we'd fall back to local.
 
-If they pick **Personal Access Token**, ask for it (header `ADO PAT`, type text, empty default) and note it stays local and must never be committed. If they pick **Hosted**, warn once that you'll fall back to Azure CLI local if the connection won't authorize — then carry on without further questions.
+**If they pick Personal Access Token — never ask for the token itself.** Microsoft's own setup guide is explicit: *"Do not commit tokens to an MCP configuration file. Set them outside the file or use a secrets manager."* A token pasted into this chat would also land in the transcript, and one passed via `cortex mcp add -e` would land in `mcp.json` in plaintext. Both are avoidable, so avoid them. Instead hand it off the same way as `gh auth login` — **Ask exactly this:**
+
+- header: `ADO token setup`
+- question: `Set your PAT in a terminal OUTSIDE this chat, so it never touches this conversation or your mcp.json. Create a PAT in Azure DevOps (User settings → Personal access tokens) with Work Items: Read & write, then add this line to your shell profile (~/.zshrc or ~/.bashrc) and open a new terminal:  export PERSONAL_ACCESS_TOKEN="$(printf '%s' 'you@example.com:YOUR_PAT' | base64)"   The email can be any non-empty value. Tell me when it's set.`
+- options:
+  - `Done — it's set` — I'll register the server to read it from your environment.
+  - `Use Azure CLI instead` — Simpler and stores no token; I'll switch you to that path.
+  - `Cancel setup` — Makes no changes.
+
+Do **not** echo, log, or store the token, and don't try to read it back to confirm — a failed connection in Phase 6 is the signal. **Note the caveat:** this path depends on CoCo passing its own environment through to the MCP child process. If Phase 6 shows an auth failure, that's the likely cause — say so and offer the Azure CLI path, which doesn't rely on it.
+
+If they pick **Hosted**, warn once that you'll fall back to Azure CLI local if the connection won't authorize — then carry on without further questions.
 
 That is the last of the required typing. Everything else you detect or default.
 
@@ -211,19 +222,32 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
    - **Jira:** `cortex mcp add atlassian https://mcp.atlassian.com/v1/mcp --type http`
    - **Linear:** `cortex mcp add linear https://mcp.linear.app/mcp --type http`
    - Jira/Linear (and dbt Cloud OAuth) authenticate via **browser on first connect** — no token here.
-   - **Azure DevOps — local + Azure CLI (recommended):** Microsoft's server is an npx package that takes the org as its first positional argument. Load only the tool groups the accelerator needs (`-d`) — the full surface spans repos, pipelines, test plans and wiki, and Microsoft themselves note models do worse with a bloated tool list:
+   - **Azure DevOps — local + Azure CLI (recommended):** Microsoft's server is an npx package taking the org as its first positional argument. **Pin the version** — Microsoft renamed the entire tool surface once already, so an unpinned install can change behaviour under you. Load only the tool groups the accelerator needs (`-d`); the full surface spans repos, pipelines, test plans and wiki, and Microsoft themselves note models do worse with a bloated tool list. Quote the org so a stray character can't split the command:
      ```bash
-     cortex mcp add ado npx -- -y @azure-devops/mcp <ADO_ORG> --authentication azcli -d core work work-items search
+     cortex mcp add ado npx -- -y "@azure-devops/mcp@2.10.0" "<ADO_ORG>" --authentication azcli -d core work work-items search
      ```
      Then confirm the CLI session exists — `az account show`; if it doesn't, the user must run `az login` in **their own terminal** (interactive browser flow, same constraint as `gh auth login` — hand it off, don't try to run it yourself).
-   - **Azure DevOps — local + PAT (fallback):** same command, `--authentication pat`, with the token base64-encoded as `email:pat` in `PERSONAL_ACCESS_TOKEN`:
+   - **Azure DevOps — local + PAT (advanced):** identical command with `--authentication pat`. **Pass no `-e` and no token** — the server reads `PERSONAL_ACCESS_TOKEN` from the environment the user already exported in Phase 1, which keeps it out of `mcp.json` per Microsoft's guidance:
      ```bash
-     cortex mcp add ado npx -- -y @azure-devops/mcp <ADO_ORG> --authentication pat -d core work work-items search \
-       -e PERSONAL_ACCESS_TOKEN="$(printf '%s' '<EMAIL>:<PAT>' | base64)"
+     cortex mcp add ado npx -- -y "@azure-devops/mcp@2.10.0" "<ADO_ORG>" --authentication pat -d core work work-items search
      ```
-     (Plaintext in the local `mcp.json` — warn, never commit.)
-   - **Azure DevOps — hosted/remote (only if they chose it):** `cortex mcp add ado https://mcp.dev.azure.com/<ADO_ORG> --type http -H "X-MCP-Toolsets: wit,search"` — then **verify it actually authorizes**. Microsoft's remote server needs Entra dynamic OAuth client registration, which most desktop clients can't do, and it rejects standalone Microsoft-account orgs. If it won't connect, say so plainly, remove it (`cortex mcp remove ado`), and fall back to the local + Azure CLI command above.
-   - **If `cortex mcp add` mangles the npx flags** (its own parser may swallow `-y`/`-d`): drop the `--` separator or, as a last resort, add the server and then correct the `args` array in `~/.snowflake/cortex/mcp.json` by hand — then run `cortex mcp start` so the manager loads it. Verify either way with `cortex mcp list`.
+   - **⚠️ Verify the arguments actually landed — this is the most likely failure in the whole setup.** `cortex mcp add`'s own parser owns `-e`, `-H` and `-t`, and whether it forwards `-y` and the variadic `-d` list to `npx` is **unverified**. Immediately after adding, read the stored entry back:
+     ```bash
+     cortex mcp list
+     python3 -c "import json,os;p=os.path.expanduser('~/.snowflake/cortex/mcp.json');print(json.load(open(p))['mcpServers']['ado'])"
+     ```
+     Confirm the `args` array contains, in order: `-y`, `@azure-devops/mcp@2.10.0`, the org, `--authentication`, the method, `-d`, then the four domains. If anything was swallowed or reordered, **fix the `args` array in `~/.snowflake/cortex/mcp.json` by hand** and run `cortex mcp start` so the manager reloads it. Don't move on until the array is right — a mangled `args` list fails at first use with a confusing error.
+   - **Azure DevOps — hosted/remote (only if they chose it):**
+     ```bash
+     cortex mcp add ado "https://mcp.dev.azure.com/<ADO_ORG>" --type http -H "X-MCP-Toolsets: wit,search"
+     ```
+     Then **verify it authorizes**. Microsoft's remote server needs Entra dynamic OAuth client registration, which most desktop clients can't do, and it rejects standalone Microsoft-account orgs. If it won't connect, say so plainly and fall back to the local + Azure CLI command above — but see the removal rule below before deleting anything.
+   - **⚠️ Never delete an MCP server the user already had.** Phase 2 told you whether an `ado`/`azure-devops` entry already existed. If it did, **do not overwrite or remove it** — register yours under a distinct name (`ado-dbt`) and note which one the accelerator will use. If you need to remove a *hosted* entry **you just created** in order to fall back to local, that's still a config change the user should approve — **ask first**:
+     - header: `Replace hosted server?`
+     - question: `The hosted Azure DevOps server couldn't authorize (expected — it needs an Entra app registration most desktop clients can't do). Remove the entry I just added and set up the local server instead?`
+     - options:
+       - `Yes — switch to local` — Removes the `ado` entry I added, then registers the local Azure CLI server.
+       - `Leave it and stop` — Keeps your config as-is. The accelerator won't work until Azure DevOps connects.
    - Then run `cortex mcp list` to confirm the new servers sit alongside the existing ones (none clobbered).
 4. **Context block** — write the user's setup into the chosen accelerator's `SKILL.md`, replacing anything between the idempotent markers (insert once if absent):
    ```
@@ -232,7 +256,7 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
 
    - Ticket tool: <Jira|Linear|Azure DevOps>
    - ADO organization / project: <org> / <project>   (Azure DevOps only)
-   - ADO auth: <azcli|pat|remote>                    (Azure DevOps only)
+   - ADO auth: <azcli|pat-env|remote>                (Azure DevOps only; `pat-env` = token read from the user's environment, never stored here)
    - dbt flavor: <Local|dbt Cloud>
    - dbt project / repo path: <path>   (Local only)
    - Default branch: <branch>
@@ -266,7 +290,8 @@ The user already told you which tool they use, so the other accelerator is obvio
    { "configured_at": "<ISO>", "ticket_tool": "<jira|linear|azure-devops>", "dbt_flavor": "<local|cloud>",
      "mcp_servers_added": ["dbt", "<atlassian|linear|ado>"], "dbt_skills_installed": true,
      "accelerator_skill": "<dbt-jira-accelerator|dbt-linear-accelerator|dbt-azure-devops-accelerator>",
-     "ado": { "org": "<org>", "project": "<project>", "auth": "<azcli|pat|remote>" },  // ADO only
+     "ado": { "org": "<org>", "project": "<project>", "auth": "<azcli|pat-env|remote>",
+               "mcp_pin": "@azure-devops/mcp@2.10.0" },  // ADO only — never a token
      "version": "0.1.0" }
    ```
 2. **Activate the servers yourself — don't make the user reload.** On current CoCo builds (v1.0.65+ added in-process MCP refresh) `cortex mcp add` already makes a new server's tools available to the agent automatically. Connect and verify them in this session by running (yourself — normal shell commands):
@@ -299,6 +324,8 @@ The user already told you which tool they use, so the other accelerator is obvio
 ## Notes
 
 - Writes only to **local files** (`mcp.json`, the accelerator `SKILL.md`, the marker). Sends nothing anywhere.
+- **Never place a credential in a command argument, a chat question, or `mcp.json`.** The dbt Cloud service token is the one unavoidable exception (its MCP transport requires a header) — warn there and never commit the file. The Azure DevOps PAT path deliberately reads from the user's own environment instead, per Microsoft's guidance; the Azure CLI path stores nothing at all.
+- **Pin third-party MCP packages** (`@azure-devops/mcp@2.10.0`) so a silent upstream change can't alter tool names under the user.
 - Add MCP servers with **`cortex mcp add`** (additive — never clobbers existing servers); on current builds their tools become available automatically. Confirm with **`cortex mcp start`** (and **`cortex mcp reconnect`** to retry a stuck one) — run these yourself; don't hand-edit `mcp.json` or ask the user to reload. Any token stays only in the local `mcp.json` (plaintext — warn, never commit).
 - Ask only what you can't detect; present one consent gate; end by inviting them to try it.
 - Present every **"Ask exactly this"** block verbatim; substitute only `<PLACEHOLDERS>`.

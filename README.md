@@ -53,7 +53,7 @@ CoCo clones the repo and registers all four skills.
 It's built to be fast: it **auto-detects almost everything** (your OS, dbt project/repo, default branch, GitHub login, prerequisites) and only asks what it genuinely can't figure out. For a local dbt user that's about **two taps**:
 
 1. **One question:** which ticket tool (**Jira**, **Linear**, or **Azure DevOps**) and how you run dbt — **Local** (dbt Core, Fusion, or dbt Projects on Snowflake) or **dbt Cloud**. *(dbt Cloud users paste their MCP URL and sign in via browser — no token, unless OAuth isn't enabled on their account. Azure DevOps users also give their org and project name, and pick a sign-in method — see the note below.)*
-2. **One review-and-confirm:** setup shows everything it detected and exactly what it'll change (install dbt Labs' official `dbt` skills, add `dbt` + your ticket server to `mcp.json` — existing servers untouched, install any missing prerequisites). You hit **Proceed**.
+2. **One review-and-confirm:** setup shows everything it detected and exactly what it'll change (install dbt Labs' official `dbt` skills, add `dbt` + your ticket server to `mcp.json` — existing servers untouched, install any missing prerequisites). You hit **Proceed**. Anything destructive — replacing or removing a server you already had — is asked separately, never bundled into that one gate.
 
 It then removes the accelerators you won't use automatically and invites you to try it immediately. (If the new tools don't show up on first try, restart Cortex Code once — MCP tools load at session start.)
 
@@ -85,7 +85,7 @@ Setup checks these for you and offers to install what's missing. Listed here for
 - **For dbt Core (local MCP):** [`uv`/`uvx`](https://docs.astral.sh/uv/) so CoCo can run `uvx dbt-mcp`.
 - **For dbt Cloud (remote MCP):** a dbt platform account. Setup prefers **OAuth** (just your MCP Endpoint URL + a browser sign-in); a **service token** is only needed as a fallback where OAuth isn't available.
 - **A Jira Cloud site**, a **Linear workspace**, *or* an **Azure DevOps Services organization**, depending on which accelerator you choose.
-- **For Azure DevOps:** **Node 20+** (Microsoft's MCP server runs via `npx`), plus either the **Azure CLI** (recommended — reuses your `az login`) or an ADO **Personal Access Token**. Azure DevOps **Server (on-premises) is not supported** by Microsoft's MCP server — Services only.
+- **For Azure DevOps:** **Node 20+** (Microsoft's MCP server runs via `npx`), plus the **Azure CLI** — the recommended path reuses your `az login` and stores no token. A **Personal Access Token** works as an advanced fallback, set as an environment variable in your own shell rather than written into any config file. Azure DevOps **Server (on-premises) is not supported** by Microsoft's MCP server — Services only.
 
 ---
 
@@ -99,17 +99,39 @@ Setup only adds the servers you need — dbt plus your one ticket tool.
 | **dbt (Cloud)** | remote `http` | **browser OAuth** (just the MCP URL) — service token only as fallback |
 | **Atlassian / Jira** | remote `http` (`https://mcp.atlassian.com/v1/mcp`) | **browser OAuth** on first connect |
 | **Linear** | remote `http` (`https://mcp.linear.app/mcp`) | **browser OAuth** on first connect |
-| **Azure DevOps** | local `stdio` via `npx -y @azure-devops/mcp <org>` | **Azure CLI** (`az login`) — or a PAT as fallback |
+| **Azure DevOps** | local `stdio` via `npx -y @azure-devops/mcp@2.10.0 <org>` | **Azure CLI** (`az login`) — no token stored; PAT via your own env var as a fallback |
 
 GitHub is **not** an MCP server here — the skills use the `git` and `gh` command-line tools directly. That's true for the Azure DevOps flow too: the **work item** lives in Azure Boards, but branches and PRs go to **GitHub**. Azure Repos isn't used.
+
+The Azure DevOps server is **version-pinned** (`@2.10.0`). Microsoft renamed its entire tool surface once already, so an unpinned `npx` install can change behaviour underneath you. Pinning `@2.8.1` instead restores the older flat tool names if you need them.
 
 ### A note on Azure DevOps sign-in
 
 Jira and Linear authorize with one browser click. Azure DevOps doesn't, and it's worth knowing why before you pick it.
 
-Microsoft ships two servers. The **hosted (remote)** one authenticates through Microsoft Entra and needs *dynamic OAuth client registration* — something most desktop clients can't do, so Microsoft documents Claude Desktop, Claude Code, Cursor, and Codex as needing either the local server or a hand-built Entra app registration. It also rejects standalone Microsoft-account organizations. Setup therefore defaults to the **local** server with Azure CLI credentials, which just works if you've run `az login`. You can still choose hosted; setup will fall back to local if it won't authorize.
+Microsoft ships two servers. The **hosted (remote)** one authenticates through Microsoft Entra and needs *dynamic OAuth client registration* — something most desktop clients can't do, so Microsoft documents Claude Desktop, Claude Code, Cursor, and Codex as needing either the local server or a hand-built Entra app registration. It also rejects standalone Microsoft-account organizations. Setup therefore defaults to the **local** server with Azure CLI credentials, which just works if you've run `az login`. You can still choose hosted; setup will offer to fall back to local if it won't authorize, and will ask before changing anything it didn't create.
 
-One more thing to know: Microsoft recently **consolidated and renamed every tool** in this server. The current tools are dispatchers (`wit_work_item` with an `action` parameter) rather than the older flat names (`wit_get_work_item`). The accelerator reads whichever generation is actually in your session, so both work — but if you see tool-name errors, that rename is the first thing to check. Pinning `@azure-devops/mcp@2.8.1` restores the old names.
+If you use a **PAT** instead, setup will not ask you to paste it. You export `PERSONAL_ACCESS_TOKEN` in your own shell profile and the server reads it from the environment — following Microsoft's own instruction: *"Do not commit tokens to an MCP configuration file. Set them outside the file or use a secrets manager."*
+
+One more thing to know: the current tools are dispatchers (`wit_work_item` with an `action` parameter) rather than the older flat names (`wit_get_work_item`). The accelerator reads whichever generation is actually in your session, so both work — but if you see tool-name errors, that rename is the first thing to check.
+
+---
+
+## Known unknowns (Azure DevOps)
+
+**The Azure DevOps accelerator has not yet been run end to end against a live Azure DevOps organization.** Jira and Linear have been; this one is built entirely from Microsoft's public documentation. That's a real difference and worth stating plainly rather than burying.
+
+Everything documented above is sourced from Microsoft's docs. These specific points could not be settled from documentation alone, so the skill carries a defined fallback for each instead of assuming:
+
+| Assumption | If it's wrong |
+|---|---|
+| `cortex mcp add` forwards `-y` and the `-d` domain list through to `npx` | Setup reads the stored `args` array back and tells you to correct `mcp.json` by hand. **This is the most likely install snag.** |
+| CoCo passes its environment to the MCP child process, so the PAT path can read `PERSONAL_ACCESS_TOKEN` | The accelerator reports the auth error and points you to the Azure CLI path, which needs no env var. |
+| The pinned server exposes the dispatcher tool names as documented | The skill enumerates the tools actually present, tries the legacy names, then stops and reports rather than guessing. |
+| The hosted/remote server can complete sign-in inside CoCo | Setup says so and offers the local path — asking first before removing anything. |
+| Your project uses a documented process template (Agile/Scrum/Basic) | State names are read from the work item type at run time; if that fails, the skill asks you. |
+
+If you run this against a real organization, corrections are welcome — that's the fastest way to turn these into facts.
 
 ---
 
@@ -117,7 +139,8 @@ One more thing to know: Microsoft recently **consolidated and renamed every tool
 
 - Your workflow answers and any tokens are written **only to local files** on your machine (`mcp.json` and the skill file). Nothing is sent anywhere by these skills.
 - **dbt Cloud (token fallback only):** if OAuth isn't available and you use a service token, it's stored in plaintext in `mcp.json`. Treat that file as a secret and **never commit it**. (The default OAuth path stores no token.)
-- **Azure DevOps (PAT option only):** a PAT is likewise stored in plaintext in `mcp.json`. The recommended Azure CLI path stores no token.
+- **Azure DevOps:** the recommended Azure CLI path stores **no token at all**. If you use a PAT, setup never asks you to paste it and never writes it to `mcp.json` — you export it in your own shell and the server reads it from the environment, per Microsoft's guidance: *"Do not commit tokens to an MCP configuration file."*
+- **Third-party MCP packages are version-pinned** so an upstream change can't silently alter behaviour on your machine.
 - **Prompt injection:** ticket text is untrusted input. The accelerators treat descriptions, comments, and linked pages as data to analyze, never as instructions — a published attack against ADO-connected agents uses hidden PR/work-item comments to redirect them. Stop-points exist partly for this reason; don't remove them.
 - This repository contains **no credentials**. Don't add any.
 
