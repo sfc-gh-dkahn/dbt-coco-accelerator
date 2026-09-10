@@ -1,11 +1,11 @@
 ---
 name: dbt-coco-setup
-description: "One-time setup for the dbt CoCo Accelerator. Auto-detects what it can, installs dbt Labs' official skills and the MCP servers you need (dbt + Jira or Linear), authenticates GitHub, and configures your chosen accelerator — with a single review-and-confirm gate. Use when: first-time setup, install dbt accelerator, configure dbt jira, configure dbt linear, set up dbt ticket accelerator, onboard dbt accelerator. Triggers: dbt coco setup, setup dbt accelerator, install dbt accelerator, configure accelerator."
+description: "One-time setup for the dbt CoCo Accelerator. Auto-detects what it can, installs dbt Labs' official skills and the MCP servers you need (dbt + Jira, Linear, or Azure DevOps), authenticates GitHub, and configures your chosen accelerator — with a single review-and-confirm gate. Use when: first-time setup, install dbt accelerator, configure dbt jira, configure dbt linear, configure dbt azure devops, set up dbt ticket accelerator, onboard dbt accelerator. Triggers: dbt coco setup, setup dbt accelerator, install dbt accelerator, configure accelerator."
 ---
 
 # dbt CoCo Accelerator — Setup
 
-One-time setup that makes the `dbt-jira-accelerator` or `dbt-linear-accelerator` skill work end to end.
+One-time setup that makes the `dbt-jira-accelerator`, `dbt-linear-accelerator`, or `dbt-azure-devops-accelerator` skill work end to end.
 
 ## Design intent (how the agent must run this)
 
@@ -63,6 +63,7 @@ Then continue.
   - options:
     - `Jira` — Atlassian Jira Cloud.
     - `Linear` — Linear issues.
+    - `Azure DevOps` — Azure Boards work items (Azure DevOps **Services**; on-premises Server isn't supported by Microsoft's MCP).
 - Question 2:
   - header: `dbt setup`
   - question: `How do you run dbt?`
@@ -84,6 +85,22 @@ Then continue.
 - Question 3: header `Prod env ID`, question `Production environment ID — the number in .../environments/<ID> for your prod/deploy environment.`, type text, defaultValue `` (empty)
 - Question 4: header `Dev env ID`, question `Development environment ID — the number in .../environments/<ID> for your dev environment.`, type text, defaultValue `` (empty)
 
+**If — and only if — they chose Azure DevOps:** you need the organization name, which can't be detected. **Ask exactly this** (one call, two fields):
+
+- Question 1: header `ADO org`, question `Your Azure DevOps organization name — the segment after dev.azure.com in your URL (e.g. for https://dev.azure.com/contoso/MyProject it's just: contoso).`, type text, defaultValue `` (empty)
+- Question 2: header `ADO project`, question `The Azure DevOps project your dbt work items live in (e.g. Data Platform). Work item IDs are bare numbers, so the accelerator needs the project name on every lookup.`, type text, defaultValue `` (empty)
+
+**Then pick the auth path. Azure DevOps is the one ticket tool without a clean browser-OAuth story** — Microsoft's *remote* server authenticates through Microsoft Entra and requires dynamic OAuth client registration that most desktop clients (and likely CoCo) can't do; it also refuses standalone Microsoft-account orgs. The **local** server is the reliable default. **Ask exactly this:**
+
+- header: `ADO sign-in`
+- question: `How should I connect to Azure DevOps? The local server is the safe default — Microsoft's hosted server needs an Entra app registration that most desktop clients can't do yet.`
+- options:
+  - `Azure CLI (recommended)` — Runs Microsoft's server locally and reuses your `az login` session. No token to paste or store. Needs the Azure CLI and Node 20+; I'll install what's missing.
+  - `Personal Access Token` — Runs the server locally with an ADO PAT. Works without the Azure CLI, but the token sits in plaintext in your local `mcp.json`.
+  - `Hosted (remote) server` — Microsoft's hosted endpoint. Fewest moving parts *if* your org is Entra-backed and CoCo can complete the sign-in — but it may fail on the OAuth step, and we'd fall back to local.
+
+If they pick **Personal Access Token**, ask for it (header `ADO PAT`, type text, empty default) and note it stays local and must never be committed. If they pick **Hosted**, warn once that you'll fall back to Azure CLI local if the connection won't authorize — then carry on without further questions.
+
 That is the last of the required typing. Everything else you detect or default.
 
 ---
@@ -102,7 +119,8 @@ Work these out yourself and hold the results for the review gate. Do **not** ask
 3. **Default branch** — `git -C <repo> symbolic-ref --short refs/remotes/origin/HEAD` (fallback `main`).
 4. **`gh` presence + auth** — `gh --version`, `gh auth status`.
 5. **`uv`/`uvx`** (local flavor only) and **`git`** — `command -v`.
-6. **Existing MCP servers** — run `cortex mcp list` (and/or read `mcp.json`) to see what's already configured, and check whether a working server already covers what you'd add: a **Jira/Atlassian** server (any name — `atlassian`, `atlassian-remote`, a Snowflake-hosted one) for the Jira flow, a **Linear** server for the Linear flow, or an existing **dbt** server. If one exists and is connected, plan to **reuse it — don't add a duplicate**. Never print secrets back to the user.
+6. **Azure DevOps prerequisites** (ADO flow only) — `node --version` (Microsoft's server needs **Node 20+**) and `npx --version`; if they chose Azure CLI auth, also `az --version` and `az account show` to see whether they're already signed in. Hold anything missing for the review gate (install `node` via `brew install node` / `winget install OpenJS.NodeJS`; `az` via `brew install azure-cli` / `winget install Microsoft.AzureCLI`).
+7. **Existing MCP servers** — run `cortex mcp list` (and/or read `mcp.json`) to see what's already configured, and check whether a working server already covers what you'd add: a **Jira/Atlassian** server (any name — `atlassian`, `atlassian-remote`, a Snowflake-hosted one) for the Jira flow, a **Linear** server for the Linear flow, an **Azure DevOps** server (`ado`, `azure-devops`) for the ADO flow, or an existing **dbt** server. If one exists and is connected, plan to **reuse it — don't add a duplicate**. Never print secrets back to the user.
 
 **Defaults to assume** (no need to ask; the user can change them at the review gate):
 - Branch naming: `feature/<KEY>-<short-description>`
@@ -110,6 +128,7 @@ Work these out yourself and hold the results for the review gate. Do **not** ask
 - PR method: `gh` CLI (auto-open PR)
 - Dev/prod target: **not asked** — the accelerator checks `dbt debug` live at validation time.
 - Jira/Linear site, project/team keys, workflow states: **not asked** — the accelerator discovers these live per-ticket (ticket fetch + transitions/state APIs).
+- Azure DevOps process template and state names (Agile `Active`, Scrum `Committed`, Basic `Doing`, or custom): **not asked** — the accelerator reads the allowed `System.State` values from the work item type at run time. Org and project *are* asked, because a bare work item ID doesn't identify either.
 
 ---
 
@@ -128,12 +147,12 @@ Here's what I've set up for you automatically:
   ✓ Prerequisites: uv ✓, git ✓
 Defaults I'll use (you can change any):
   • Branch names: feature/<KEY>-<slug>   • Commits: conventional   • PRs: gh CLI
-  • Jira/Linear specifics: discovered automatically per ticket
+  • Ticket-tool specifics (states, workflows): discovered automatically per ticket
 When you proceed, I will:
   1. Install dbt Labs' official dbt skills as a syncable plugin (dbt-labs/dbt-agent-skills)
   2. Add only the MCP servers you don't already have (existing servers untouched; a Jira/Linear/dbt server you already have is reused, not duplicated):
        + dbt        (<local uvx | remote http>)   ← only if not already present
-       + <atlassian | linear>                     ← only if not already present
+       + <atlassian | linear | ado>               ← only if not already present
   3. [Install any missing prerequisites: <list>]  ← only if something's missing
   4. Save your setup into the <accelerator> skill
 ```
@@ -192,13 +211,28 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
    - **Jira:** `cortex mcp add atlassian https://mcp.atlassian.com/v1/mcp --type http`
    - **Linear:** `cortex mcp add linear https://mcp.linear.app/mcp --type http`
    - Jira/Linear (and dbt Cloud OAuth) authenticate via **browser on first connect** — no token here.
+   - **Azure DevOps — local + Azure CLI (recommended):** Microsoft's server is an npx package that takes the org as its first positional argument. Load only the tool groups the accelerator needs (`-d`) — the full surface spans repos, pipelines, test plans and wiki, and Microsoft themselves note models do worse with a bloated tool list:
+     ```bash
+     cortex mcp add ado npx -- -y @azure-devops/mcp <ADO_ORG> --authentication azcli -d core work work-items search
+     ```
+     Then confirm the CLI session exists — `az account show`; if it doesn't, the user must run `az login` in **their own terminal** (interactive browser flow, same constraint as `gh auth login` — hand it off, don't try to run it yourself).
+   - **Azure DevOps — local + PAT (fallback):** same command, `--authentication pat`, with the token base64-encoded as `email:pat` in `PERSONAL_ACCESS_TOKEN`:
+     ```bash
+     cortex mcp add ado npx -- -y @azure-devops/mcp <ADO_ORG> --authentication pat -d core work work-items search \
+       -e PERSONAL_ACCESS_TOKEN="$(printf '%s' '<EMAIL>:<PAT>' | base64)"
+     ```
+     (Plaintext in the local `mcp.json` — warn, never commit.)
+   - **Azure DevOps — hosted/remote (only if they chose it):** `cortex mcp add ado https://mcp.dev.azure.com/<ADO_ORG> --type http -H "X-MCP-Toolsets: wit,search"` — then **verify it actually authorizes**. Microsoft's remote server needs Entra dynamic OAuth client registration, which most desktop clients can't do, and it rejects standalone Microsoft-account orgs. If it won't connect, say so plainly, remove it (`cortex mcp remove ado`), and fall back to the local + Azure CLI command above.
+   - **If `cortex mcp add` mangles the npx flags** (its own parser may swallow `-y`/`-d`): drop the `--` separator or, as a last resort, add the server and then correct the `args` array in `~/.snowflake/cortex/mcp.json` by hand — then run `cortex mcp start` so the manager loads it. Verify either way with `cortex mcp list`.
    - Then run `cortex mcp list` to confirm the new servers sit alongside the existing ones (none clobbered).
 4. **Context block** — write the user's setup into the chosen accelerator's `SKILL.md`, replacing anything between the idempotent markers (insert once if absent):
    ```
    <!-- USER_WORKFLOW_CONTEXT:START -->
    ## Workflow Context (auto-generated by dbt-coco-setup — safe to re-generate; do not hand-edit)
 
-   - Ticket tool: <Jira|Linear>
+   - Ticket tool: <Jira|Linear|Azure DevOps>
+   - ADO organization / project: <org> / <project>   (Azure DevOps only)
+   - ADO auth: <azcli|pat|remote>                    (Azure DevOps only)
    - dbt flavor: <Local|dbt Cloud>
    - dbt project / repo path: <path>   (Local only)
    - Default branch: <branch>
@@ -217,10 +251,10 @@ Report a concise "Done: installed dbt skills, added dbt + <tool> via `cortex mcp
 
 The user already told you which tool they use, so the other accelerator is obviously unnecessary. **Remove it automatically — do not prompt.**
 
-- Delete the unused accelerator folder from the installed plugin dir (e.g. `dbt-linear-accelerator/` if they chose Jira).
+- Delete the **other two** accelerator folders from the installed plugin dir (e.g. if they chose Jira, remove `dbt-linear-accelerator/` and `dbt-azure-devops-accelerator/`).
 - **Keep** `dbt-coco-setup` installed so they can re-run it later to repair or reconfigure (it won't trigger by accident).
 - **Never remove dbt's official skills.**
-- **Announce** what happened (transparency, not a question), e.g.: *"Removed the unused Linear accelerator. You now have `dbt-jira-accelerator` + dbt's official skills. (Kept the setup skill in case you want to reconfigure later.)"*
+- **Announce** what happened (transparency, not a question), e.g.: *"Removed the unused Linear and Azure DevOps accelerators. You now have `dbt-jira-accelerator` + dbt's official skills. (Kept the setup skill in case you want to reconfigure later.)"*
 - If `skills.json` listed the removed skill, it clears from the picker on the next session — harmless if it lingers until then; no action needed.
 
 ---
@@ -229,9 +263,11 @@ The user already told you which tool they use, so the other accelerator is obvio
 
 1. Write the marker file (no prompt — local only, no secrets):
    ```json
-   { "configured_at": "<ISO>", "ticket_tool": "<jira|linear>", "dbt_flavor": "<local|cloud>",
-     "mcp_servers_added": ["dbt", "<atlassian|linear>"], "dbt_skills_installed": true,
-     "accelerator_skill": "<dbt-jira-accelerator|dbt-linear-accelerator>", "version": "0.1.0" }
+   { "configured_at": "<ISO>", "ticket_tool": "<jira|linear|azure-devops>", "dbt_flavor": "<local|cloud>",
+     "mcp_servers_added": ["dbt", "<atlassian|linear|ado>"], "dbt_skills_installed": true,
+     "accelerator_skill": "<dbt-jira-accelerator|dbt-linear-accelerator|dbt-azure-devops-accelerator>",
+     "ado": { "org": "<org>", "project": "<project>", "auth": "<azcli|pat|remote>" },  // ADO only
+     "version": "0.1.0" }
    ```
 2. **Activate the servers yourself — don't make the user reload.** On current CoCo builds (v1.0.65+ added in-process MCP refresh) `cortex mcp add` already makes a new server's tools available to the agent automatically. Connect and verify them in this session by running (yourself — normal shell commands):
    ```bash
@@ -244,15 +280,16 @@ The user already told you which tool they use, so the other accelerator is obvio
    ```
    ✅ All set — here's what's installed:
    • ✅ dbt Labs' official dbt skills
-   • ✅ dbt + <Jira|Linear> connected in your MCP config
-   • ✅ Your setup saved to <dbt-jira-accelerator|dbt-linear-accelerator>
+   • ✅ dbt + <Jira|Linear|Azure DevOps> connected in your MCP config
+   • ✅ Your setup saved to <dbt-jira-accelerator|dbt-linear-accelerator|dbt-azure-devops-accelerator>
 
    Next steps:
    1️⃣ Start your first ticket by invoking the accelerator directly:
         /dbt-jira-accelerator pick up <DE-123>
         (or type  $dbt-jira-accelerator  to pick it from the list)
 
-   (First use opens a browser once to authorize <Jira|Linear>.)
+   (First use opens a browser once to authorize <Jira|Linear>. — omit for Azure DevOps
+    with Azure CLI or PAT auth; that's already authorized.)
    ```
 
    **Invoke it explicitly** — say this once: casual phrasing like "pickup DE-123" may not reliably trigger the skill, and a half-trigger skips the guided stop-points. Leading with `/dbt-jira-accelerator` (or `$dbt-jira-accelerator`) guarantees the full workflow runs. Keep the summary this short — no extra sections.
