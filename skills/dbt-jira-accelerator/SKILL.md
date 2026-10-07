@@ -29,6 +29,26 @@ This accelerator **orchestrates** the ticket-to-PR workflow. It does **not** re-
 
 If these skills aren't installed, fall back to the (thinner) built-in guidance in this skill and suggest the user run `dbt-coco-setup` to install them. Delegation never bypasses this skill's **stop-points** — you still own the Step 1/2/4/7 confirmations.
 
+## Atlassian MCP (v2) tools
+
+`dbt-coco-setup` connects Atlassian MCP **v2** in flat mode (`https://mcp.atlassian.com/v2/mcp?tools=all`), so these tools are called directly by name:
+
+| Job | Tool |
+|---|---|
+| Resolve `cloudId` (only if the Workflow Context lacks a site URL) | `getAccessibleAtlassianResources` |
+| Find a ticket from a partial reference | `searchJiraIssuesUsingJql` |
+| Read the ticket (add `changelog`/`comment` fields when history matters) | `getJiraIssue` |
+| Read a linked Confluence spec | `getConfluencePage`, `searchConfluenceUsingCql` |
+| Move the ticket | `getTransitionsForJiraIssue` → `transitionJiraIssue` |
+| Post the PR link | `addCommentToJiraIssue` |
+
+Rules:
+- **Pass the Jira site URL as `cloudId`.** Atlassian accepts the hostname directly (e.g. `yoursite.atlassian.net`), which skips a discovery call on every ticket. If the Workflow Context has no site URL, call `getAccessibleAtlassianResources` once, then offer to save the site and project key to `/memories` so later runs skip it.
+- **Cap searches.** Always pass `maxResults: 10` (JQL) or `limit: 10` (CQL), scoped to the project key(s) from context.
+- **Prefer direct JQL/CQL over Rovo `search`.** Rovo Search and Teamwork Graph calls spend Rovo credits (up to 10 per call); use them only when a keyword lookup misses.
+- **If you only see `discover`/`execute` tools,** the server is on v2's default on-demand mode, not flat mode. Use `discover` to find the tool above, then call it through `execute`, and suggest re-running `dbt-coco-setup` to switch to `?tools=all`.
+- **If you see older or different names** (a v1 connection that setup kept, e.g. token auth), use the closest equivalent for read, transition, and comment.
+
 ## Execution discipline (read first — non-negotiable)
 
 This skill defines **stopping points** marked **⚠️ STOP**. They are mandatory.
@@ -78,10 +98,11 @@ Done → PR created and linked to the Jira ticket
 
 **Actions:**
 
-1. **Get the ticket.** Ask for the key (e.g. `DE-1234`) or accept one given; resolve partial references with the Atlassian MCP search (scoped to the project key(s) from context).
-2. **Fetch the ticket *and its context*** via the Atlassian MCP:
+1. **Get the ticket.** Ask for the key (e.g. `DE-1234`) or accept one given; resolve partial references with `searchJiraIssuesUsingJql` (scoped to the project key(s) from context, `maxResults: 10`).
+2. **Fetch the ticket *and its context*** with `getJiraIssue`:
    - The ticket: summary, description, acceptance criteria, comments, labels, components, status, priority.
    - **Linked & parent context:** linked issues, the parent epic/story, and sub-tasks — requirements often live there, not in the ticket body.
+   - **History, PRs, and recordings (v2):** when the ticket is old or its scope looks changed, read the changelog for what moved and why. If the ticket links prior PRs or a Loom recording and the server exposes them, skim them — a past PR often shows which models the work touched last time.
    - **Linked Confluence pages:** if the ticket references or links a Confluence spec, metric definition, or data dictionary, **read it** (the Atlassian MCP covers Confluence for Jira users). If a needed definition isn't linked, search Confluence for the business terms/metrics the ticket names.
    - **Other doc sources:** if the ticket points to Notion, Google Docs, or another source and a matching MCP or fetchable link is available, read it; otherwise ask the user to paste the relevant definition.
 3. **Run a completeness check** — do you actually have enough to build it correctly? List it as known vs unknown:
@@ -93,7 +114,7 @@ Done → PR created and linked to the Jira ticket
 
 **⚠️ STOP**: Confirm understanding and ask **targeted** questions for each unknown from the completeness check — not a generic "does this look right?". Proceed only once grain, sources, logic, and acceptance criteria are clear.
 
-**After the user confirms:** Transition the ticket to the active "in progress" state from the Workflow Context via the Atlassian MCP transition tool (find the transition ID first, e.g. `getTransitionsForJiraIssue`). If transitions aren't available, tell the user what to update manually.
+**After the user confirms:** Transition the ticket to the active "in progress" state from the Workflow Context with `transitionJiraIssue` (get the transition ID from `getTransitionsForJiraIssue` first). If transitions aren't available, tell the user what to update manually.
 
 ### Step 2: Identify the Right dbt Repository
 
@@ -287,7 +308,7 @@ For test failures, discuss whether the test, source data, or model logic is wron
      ```
      Use the **Jira site URL from the Workflow Context** for the ticket link.
    - If PR method is **push-only**: push the branch and give the user the compare/PR URL to open manually.
-7. **Comment on the Jira ticket** with the PR link (if the Atlassian MCP exposes a comment tool) and move it to the review state from context.
+7. **Comment on the Jira ticket** with the PR link (`addCommentToJiraIssue`) and move it to the review state from context (`getTransitionsForJiraIssue` → `transitionJiraIssue`).
 8. Present the PR URL. **Reminder:** move `<TICKET-KEY>` to **Done** once the PR is merged and deployed.
 
 ### Closing: save durable learnings (optional)
@@ -309,7 +330,7 @@ Steps 3, 5, and 6 flow automatically unless errors require input. Step 5 stays c
 - If the Jira or dbt MCP tools aren't available in the session (e.g. just installed), run `cortex mcp start` (or `cortex mcp reconnect` for a stuck server) **yourself** to connect them live, then retry — don't ask the user to restart. A reload is a last resort only on older CoCo builds.
 - **Delegate dbt craft** to the companion skills listed in the "Companion skills" section above; don't re-implement dbt guidance here.
 - Source control uses the `git` and `gh` CLIs directly — no GitHub MCP.
-- Atlassian MCP tool names vary by version; use the available equivalents for read, transition, and comment.
+- Atlassian MCP tool names are listed in "Atlassian MCP (v2) tools" above. If the session shows something else (on-demand `discover`/`execute`, or a v1 connection), follow the fallback rules there.
 - Always match existing project conventions — read neighboring models before writing new ones.
 - Never commit secrets, credentials, profile information, or unrelated user changes.
 
