@@ -132,6 +132,8 @@ Work these out yourself and hold the results for the review gate. Do **not** ask
 5. **`uv`/`uvx`** (local flavor only) and **`git`** — `command -v`.
 6. **Azure DevOps prerequisites** (ADO flow only) — `node --version` (Microsoft's server needs **Node 20+**) and `npx --version`; if they chose Azure CLI auth, also `az --version` and `az account show` to see whether they're already signed in. Hold anything missing for the review gate (install `node` via `brew install node` / `winget install OpenJS.NodeJS`; `az` via `brew install azure-cli` / `winget install Microsoft.AzureCLI`).
 7. **Existing MCP servers** — run `cortex mcp list` (and/or read `mcp.json`) to see what's already configured, and check whether a working server already covers what you'd add: a **Jira/Atlassian** server (any name — `atlassian`, `atlassian-remote`, a Snowflake-hosted one) for the Jira flow, a **Linear** server for the Linear flow, an **Azure DevOps** server (`ado`, `azure-devops`) for the ADO flow, or an existing **dbt** server. If one exists and is connected, plan to **reuse it — don't add a duplicate**. Never print secrets back to the user.
+   - **Atlassian v1 → v2 check (Jira flow only).** If the Atlassian entry's URL is `https://mcp.atlassian.com/v1/mcp` or `.../v1/mcp/authv2`, flag it as **on v1** rather than reusing it as-is. Atlassian MCP v2 adds tools (Loom, changelogs, linked PRs), and on **March 1, 2027** v1 connections switch to v2 tools automatically — clients with stale cached credentials can break at that point. Hold a migration for the review gate (Phase 3) and Phase 4 step 3.
+   - **Leave token-auth entries on v1.** If the v1 entry sends an `Authorization` header (Basic API token or Bearer service key), don't migrate it: Atlassian documents token auth only for `v1/mcp`. Reuse it and note that in the review gate.
 
 **Defaults to assume** (no need to ask; the user can change them at the review gate):
 - Branch naming: `feature/<KEY>-<short-description>`
@@ -164,6 +166,7 @@ When you proceed, I will:
   2. Add only the MCP servers you don't already have (existing servers untouched; a Jira/Linear/dbt server you already have is reused, not duplicated):
        + dbt        (<local uvx | remote http>)   ← only if not already present
        + <atlassian | linear | ado>               ← only if not already present
+       ~ <NAME>     Atlassian v1 → v2 (re-add, sign in again)  ← only if Phase 2 found an OAuth v1 entry
   3. [Install any missing prerequisites: <list>]  ← only if something's missing
   4. Save your setup into the <accelerator> skill
 ```
@@ -219,7 +222,16 @@ The user consented at Phase 3. Execute in order, reporting each result briefly:
        -H "x-dbt-dev-environment-id: <DEV_ENV_ID>"
      ```
      (Token lands plaintext in the local `mcp.json` — never commit it. Re-check https://docs.getdbt.com/docs/dbt-ai/about-mcp if the endpoint looks stale.)
-   - **Jira:** `cortex mcp add atlassian https://mcp.atlassian.com/v1/mcp --type http`
+   - **Jira:** `cortex mcp add atlassian "https://mcp.atlassian.com/v2/mcp?tools=all" --type http`
+     - **Why `?tools=all`:** by default v2 hides its tools behind `discover`/`execute` helpers and loads them on demand. `?tools=all` is Atlassian's documented flat `tools/list` mode, so the named Jira tools the accelerator calls (`getJiraIssue`, `transitionJiraIssue`, …) show up directly. Quote the URL so the shell doesn't treat `?` as a glob.
+     - **Migrating a v1 entry** (Phase 2 flagged it, user approved at the review gate): v1 and v2 are separate OAuth resources, so the old sign-in doesn't carry over. Remove the old entry, then add v2 **under the same name** so nothing else that refers to it breaks:
+       ```bash
+       cortex mcp remove <NAME>
+       cortex mcp add <NAME> "https://mcp.atlassian.com/v2/mcp?tools=all" --type http
+       ```
+       The user signs in through the browser again on first connect. Never migrate an entry the user didn't approve, and never touch a token-auth (header) entry.
+     - **Verify the URL landed intact.** Read the entry back from `mcp.json` and confirm the `url` still ends in `?tools=all`. If `cortex mcp add` dropped the query string, fix the `url` by hand and run `cortex mcp start`.
+     - **If v2 won't connect** (OAuth fails, or the org's admin domain controls block CoCo), say so plainly. With approval, fall back to `https://mcp.atlassian.com/v1/mcp`, which stays supported until the March 1, 2027 switch.
    - **Linear:** `cortex mcp add linear https://mcp.linear.app/mcp --type http`
    - Jira/Linear (and dbt Cloud OAuth) authenticate via **browser on first connect** — no token here.
    - **Azure DevOps — local + Azure CLI (recommended):** Microsoft's server is an npx package taking the org as its first positional argument. **Pin the version** — Microsoft renamed the entire tool surface once already, so an unpinned install can change behaviour under you. Load only the tool groups the accelerator needs (`-d`); the full surface spans repos, pipelines, test plans and wiki, and Microsoft themselves note models do worse with a bloated tool list. Quote the org so a stray character can't split the command:
@@ -292,7 +304,7 @@ The user already told you which tool they use, so the other accelerator is obvio
      "accelerator_skill": "<dbt-jira-accelerator|dbt-linear-accelerator|dbt-azure-devops-accelerator>",
      "ado": { "org": "<org>", "project": "<project>", "auth": "<azcli|pat-env|remote>",
                "mcp_pin": "@azure-devops/mcp@2.10.0" },  // ADO only — never a token
-     "version": "0.1.0" }
+     "version": "0.2.0" }
    ```
 2. **Activate the servers yourself — don't make the user reload.** On current CoCo builds (v1.0.65+ added in-process MCP refresh) `cortex mcp add` already makes a new server's tools available to the agent automatically. Connect and verify them in this session by running (yourself — normal shell commands):
    ```bash

@@ -97,13 +97,22 @@ Setup only adds the servers you need — dbt plus your one ticket tool.
 |---|---|---|
 | **dbt (Core)** | local `stdio` via `uvx dbt-mcp` | local dbt profile / env vars — no browser |
 | **dbt (Cloud)** | remote `http` | **browser OAuth** (just the MCP URL) — service token only as fallback |
-| **Atlassian / Jira** | remote `http` (`https://mcp.atlassian.com/v1/mcp`) | **browser OAuth** on first connect |
+| **Atlassian / Jira** | remote `http` (`https://mcp.atlassian.com/v2/mcp?tools=all`) | **browser OAuth** on first connect (v1 setups are migrated on re-run; see below) |
 | **Linear** | remote `http` (`https://mcp.linear.app/mcp`) | **browser OAuth** on first connect |
 | **Azure DevOps** | local `stdio` via `npx -y @azure-devops/mcp@2.10.0 <org>` | **Azure CLI** (`az login`) — no token stored; PAT via your own env var as a fallback |
 
 GitHub is **not** an MCP server here — the skills use the `git` and `gh` command-line tools directly. That's true for the Azure DevOps flow too: the **work item** lives in Azure Boards, but branches and PRs go to **GitHub**. Azure Repos isn't used.
 
 The Azure DevOps server is **version-pinned** (`@2.10.0`). Microsoft renamed its entire tool surface once already, so an unpinned `npx` install can change behaviour underneath you. Pinning `@2.8.1` instead restores the older flat tool names if you need them.
+
+### A note on Atlassian MCP v2
+
+Atlassian renamed Rovo MCP to **Atlassian MCP** and shipped a v2 endpoint with more tools (Loom, ticket changelogs, linked PRs). Setup now connects to `https://mcp.atlassian.com/v2/mcp?tools=all`:
+
+- **`?tools=all`** turns off v2's default on-demand `discover`/`execute` mode and lists every tool by name, which is what the Jira accelerator calls.
+- **Already set up on v1?** Re-run `dbt-coco-setup`. It spots the v1 entry, asks before changing it, and re-adds it on v2 under the same name. You sign in through the browser again because v1 and v2 use separate OAuth sign-ins.
+- **Using an API token?** Setup leaves token-auth entries on v1, since Atlassian documents token auth only for v1.
+- **Deadline:** on March 1, 2027, Atlassian switches v1 connections to v2 tools automatically. Migrating first avoids broken cached credentials on that date. See [Atlassian's migration guide](https://support.atlassian.com/atlassian-ai-gateway/docs/how-to-upgrade-from-atlassian-mcp-v1-to-atlassian-mcp-v2/).
 
 ### A note on Azure DevOps sign-in
 
